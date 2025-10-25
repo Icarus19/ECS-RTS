@@ -1,5 +1,6 @@
 using Unity.Collections;
 using Unity.Entities;
+using Unity.Jobs;
 
 namespace Systems.DamageEventSystems
 {
@@ -25,6 +26,7 @@ namespace Systems.DamageEventSystems
     public class DamageEventManager
     {
         public NativeParallelMultiHashMap<Entity, NativeDamageEvent> Events;
+        public JobHandle LastWriterHandle;
 
         public DamageEventManager(int capacity)
         {

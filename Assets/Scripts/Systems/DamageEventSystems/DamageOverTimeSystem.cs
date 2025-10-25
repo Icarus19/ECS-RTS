@@ -8,63 +8,64 @@ namespace Systems.DamageEventSystems
     [BurstCompile]
     [UpdateInGroup(typeof(DamageEventPipelineSystemGroup))]
     [UpdateBefore(typeof(DamageApplicationSystem))]
-    public partial class DamageOverTimeSystem : SystemBase
+    public partial struct DamageOverTimeSystem : ISystem
     {
-        DamageEventManager _damageEventManager;
-
-        protected override void OnCreate()
+        public void OnUpdate(ref SystemState state)
         {
-            _damageEventManager = DamageEventManagerSingleton.Instance;
-        }
-        protected override void OnUpdate()
-        {
-            var writer = _damageEventManager.AsParallelWriter();
+            var writer = DamageEventManagerSingleton.Instance.AsParallelWriter();
+            var lastHandle = DamageEventManagerSingleton.Instance.LastWriterHandle;
             var dt = SystemAPI.Time.DeltaTime;
-            
-            new ApplyDoTJob
+
+            var dotJobHandle = new ApplyDoTJob
             {
                 Writer = writer,
                 DeltaTime = dt
-            }.ScheduleParallel();
+            }.ScheduleParallel(lastHandle);
+
+            DamageEventManagerSingleton.Instance.LastWriterHandle = dotJobHandle;
+            state.Dependency = dotJobHandle;
         }
-        [BurstCompile]
-        public partial struct ApplyDoTJob : IJobEntity
+    }
+
+    [BurstCompile]
+    public partial struct ApplyDoTJob : IJobEntity
+    {
+        public NativeParallelMultiHashMap<Entity, NativeDamageEvent>.ParallelWriter Writer;
+        public float DeltaTime;
+
+        public void Execute(Entity entity, DynamicBuffer<DamageOverTime> dots)
         {
-            public NativeParallelMultiHashMap<Entity, NativeDamageEvent>.ParallelWriter Writer;
-            public float DeltaTime;
-
-            public void Execute(Entity entity, DynamicBuffer<DamageOverTime> dots)
+            for (int i = dots.Length - 1; i >= 0; i--)
             {
-                for (int i = 0; i < dots.Length; i++)
+                var dot = dots[i];
+
+                bool infinite = dot.Duration <= 0;
+                
+                if(!infinite)
+                    dot.Duration -= DeltaTime;
+
+                if (PeriodicEffectUtility.UpdateTick(ref dot.Timer, dot.Interval, DeltaTime))
                 {
-                    var dot = dots[i];
+                    var evt = new NativeDamageEvent
+                    {
+                        Source = entity,
+                        Target = entity,
+                        Value = dot.Damage,
+                        Type = dot.Type
+                    };
                     
-                    if(dot.Duration >0)
-                        dot.Duration -= DeltaTime;
+                    Writer.Add(entity, evt);
 
-                    if (PeriodicEffectUtility.UpdateTick(ref dot.Timer, dot.Interval, DeltaTime))
-                    {
-                        var evt = new NativeDamageEvent
-                        {
-                            Source = entity,
-                            Target = entity,
-                            Value = dot.Damage,
-                            Type = dot.Type
-                        };
-                        
-                        Writer.Add(entity, evt);
-
-                        dot.Timer += dot.Interval;
-                    }
-                    
-                    if (dot.Duration <= 0f)
-                    {
-                        dots.RemoveAt(i);
-                    }
-                    else
-                    {
-                        dots[i] = dot;
-                    }
+                    dot.Timer += dot.Interval;
+                }
+                
+                if (!infinite && dot.Duration <= 0f)
+                {
+                    dots.RemoveAt(i);
+                }
+                else
+                {
+                    dots[i] = dot;
                 }
             }
         }

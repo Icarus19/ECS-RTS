@@ -15,45 +15,36 @@ namespace Systems.ModifierSystems
         {
             float dt = SystemAPI.Time.DeltaTime;
 
-            new HealingTickJob
+            foreach (var (health, hots) in
+                     SystemAPI.Query<RefRW<Health>, DynamicBuffer<HealingOverTime>>())
             {
-                DeltaTime = dt
-            }.ScheduleParallel();
-        }
-
-        [BurstCompile]
-        public partial struct HealingTickJob : IJobEntity
-        {
-            public float DeltaTime;
-
-            public void Execute(Entity entity, RefRW<Health> health, DynamicBuffer<HealingOverTime> hots)
-            {
+                // Iterate backwards for safe removal
                 for (int i = hots.Length - 1; i >= 0; i--)
                 {
-                    var hot = hots[i];
+                    // Get a ref to the element instead of a copy
+                    ref var hot = ref hots.ElementAt(i);
 
-                    if(hot.Duration >= 0)
-                        hot.Duration -= DeltaTime;
+                    bool infinite = hot.Duration <= 0;
+                    
+                    // Reduce duration
+                    if (!infinite)
+                        hot.Duration -= dt;
 
-                    // Tick check using shared helper
-                    if (PeriodicEffectUtility.UpdateTick(ref hot.Timer, hot.Interval, DeltaTime))
+                    // Perform tick check using your shared utility
+                    if (PeriodicEffectUtility.UpdateTick(ref hot.Timer, hot.Interval, dt))
                     {
                         health.ValueRW.Current = math.min(
                             health.ValueRO.Max,
                             health.ValueRO.Current + hot.Heal);
                     }
 
-                    if (hot.Duration <= 0f)
+                    // Remove if expired
+                    if (!infinite && hot.Duration <= 0f)
                     {
                         hots.RemoveAt(i);
-                    }
-                    else
-                    {
-                        hots[i] = hot;
                     }
                 }
             }
         }
     }
-
 }

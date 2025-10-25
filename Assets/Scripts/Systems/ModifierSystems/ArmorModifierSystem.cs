@@ -16,7 +16,7 @@ public partial struct ArmorModifierSystem : ISystem
     {
         foreach(var (armor, buffer) in SystemAPI.Query<RefRW<Armor>, DynamicBuffer<ArmorModifier>>())
         {
-            for (int i = 0; i < buffer.Length; ++i)
+            for (int i = buffer.Length - 1; i >= 0; i--)
             {
                 if (buffer[i].Duration > 0)
                 {

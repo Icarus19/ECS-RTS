@@ -3,35 +3,36 @@ using Unity.Entities;
 using Unity.Mathematics;
 using Helpers;
 using Unity.Collections;
+using Unity.Jobs;
 
 namespace Systems.DamageEventSystems
 {
     [BurstCompile]
     [UpdateInGroup(typeof(DamageEventPipelineSystemGroup))]
-    [UpdateAfter(typeof(ProjectileDamageSystem))]
-    [UpdateAfter(typeof(MeleeDamageSystem))]
+    //[UpdateAfter(typeof(ProjectileDamageSystem))]
+    //[UpdateAfter(typeof(MeleeDamageSystem))]
     [UpdateAfter(typeof(DamageOverTimeSystem))]
-    public partial class DamageApplicationSystem : SystemBase
+    public partial struct DamageApplicationSystem : ISystem
     {
-        DamageEventManager _damageEventManager;
-
-        protected override void OnCreate()
+        public void OnUpdate(ref SystemState state)
         {
-            _damageEventManager = DamageEventManagerSingleton.Instance;
-        }
-
-        protected override void OnUpdate()
-        {
-            var events = _damageEventManager.Events;
-            var job = new ApplyDamageJob
+            var events = DamageEventManagerSingleton.Instance.Events;
+            var lastHandle = DamageEventManagerSingleton.Instance.LastWriterHandle;
+            
+            var applyJobHandle = new ApplyDamageJob
             {
                 Events = events
-            };
+            }.ScheduleParallel(lastHandle);
 
-            job.ScheduleParallel();
-            //state.Dependency.Complete(); // optional — ensures applied before clearing
-
-            _damageEventManager.Reset();
+            state.Dependency = applyJobHandle;
+            
+            var clearJobHandle = new ClearDamageEventsJob
+            {
+                Events = events
+            }.Schedule(applyJobHandle);
+            
+            state.Dependency = clearJobHandle;
+            DamageEventManagerSingleton.Instance.LastWriterHandle = clearJobHandle;
         }
     }
 
@@ -100,100 +101,15 @@ namespace Systems.DamageEventSystems
             health.Current -= (totalDamage - absorbed);
         }
     }
+    [BurstCompile]
+    public struct ClearDamageEventsJob : IJob
+    {
+        public NativeParallelMultiHashMap<Entity, NativeDamageEvent> Events;
+
+        public void Execute()
+        {
+            if (Events.IsCreated)
+                Events.Clear();
+        }
+    }
 }
-/*
-    [BurstCompile]
-    public partial struct DamageEventSystem : ISystem
-    {
-        //private NativeQueue<CombatLogEntry> _combatLogQueue;
-
-        public void OnCreate(ref SystemState state)
-        {
-            //_combatLogQueue = new NativeQueue<CombatLogEntry>(Allocator.Persistent);
-
-            state.RequireForUpdate<DamageEvent>();
-            //state.RequireForUpdate<CombatLog>();
-        }
-
-        public void OnUpdate(ref SystemState state)
-        {
-            var job = new DamageEventJob();
-            job.ScheduleParallel();
-            var job = new DamageEventJob
-            {
-                CombatLogQueue = _combatLogQueue.AsParallelWriter(),
-                Time = (float)SystemAPI.Time.ElapsedTime
-            };
-            job.ScheduleParallel();
-
-            var logEntity = SystemAPI.GetSingletonEntity<CombatLog>();
-            var buffer = state.EntityManager.GetBuffer<CombatLogEntry>(logEntity);
-
-            while (_combatLogQueue.TryDequeue(out var entry))
-            {
-                buffer.Add(entry);
-            }
-        }
-
-        public void OnDestroy(ref SystemState state)
-        {
-            //_combatLogQueue.Dispose();
-        }
-    }
-
-    /// <summary>
-    /// For future me.
-    /// In order to have multiple entities create a damage event for the same entity in the same frame
-    /// We first need to create NativeQueue<DamageEvent> and collect them in a damageAggregationJob
-    /// </summary>
-    [BurstCompile]
-    public partial struct DamageEventJob : IJobEntity
-    {
-        [NativeDisableParallelForRestriction]
-        public NativeQueue<CombatLogEntry>.ParallelWriter CombatLogQueue;
-        public float Time;
-
-        public void Execute(Entity entity,
-            ref Health health,
-            ref Shield shield,
-            ref Armor armor,
-            DynamicBuffer<DamageEvent> damageBuffer)
-        {
-            float totalDamage = 0f;
-
-            for (int i = 0; i < damageBuffer.Length; i++)
-            {
-                var dmg = damageBuffer[i];
-                float resistance = 0f;
-
-                // Get the relevant resistance directly from the armor component
-                switch (dmg.Type)
-                {
-                    case DamageType.Physical:
-                        resistance = DamageCalculator.ArmorReduction(armor.PhysicalResistance);
-                        break;
-                    case DamageType.Magical:
-                        resistance = DamageCalculator.ArmorReduction(armor.MagicalResistance);
-                        break;
-                    case DamageType.Fire:
-                        resistance = DamageCalculator.ArmorReduction(armor.FireResistance);
-                        break;
-                    case DamageType.Ice:
-                        resistance = DamageCalculator.ArmorReduction(armor.IceResistance);
-                        break;
-                    case DamageType.Poison:
-                        resistance = DamageCalculator.ArmorReduction(armor.PoisonResistance);
-                        break;
-                }
-
-                totalDamage += dmg.Value * resistance * armor.Amplification;
-            }
-
-            damageBuffer.Clear();
-
-            float absorbed = math.min(shield.Value, totalDamage);
-            shield.Value -= absorbed;
-            health.Current -= (totalDamage - absorbed);
-        }
-    }
-}*/

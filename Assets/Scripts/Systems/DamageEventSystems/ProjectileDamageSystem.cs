@@ -4,9 +4,9 @@ namespace Systems.DamageEventSystems
 {
     
     [UpdateInGroup(typeof(DamageEventPipelineSystemGroup))]
-    public partial class ProjectileDamageSystem : SystemBase
+    public partial struct ProjectileDamageSystem : ISystem
     {
-        protected override void OnUpdate()
+        public void OnUpdate(ref SystemState state)
         {
             //throw new System.NotImplementedException();
         }
